@@ -46,7 +46,7 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Alice Liu
 
 ### Introduction 
 
@@ -54,84 +54,232 @@ Paragraph or two introducing your datasets and variables, why they are interesti
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+possum <- read_csv("~/project2/possum.csv")
 
-# if your dataset needs tidying, do so here
-
-# any other code here
+possum <- possum %>% select(2:15) # getting rid of X1 column
+na.omit(possum) -> possum 
+head(possum)
+possum %>% group_by(sex) %>% summarize(n = n())
 ```
+
+My Project 2 is over the possum dataset. This dataset measures various possum body lengths, and it also notes sex, age, and which location they were found in, and the different sites where the possums were trapped.   I found the dataset in the github link provided on the instructions page.  There are 101 total observations. In total, there are 14 variables.
+(1)case: observation number 
+(2)site: one of seven locations the possums were trapped 
+(3)Pop: classifies the sites as Victoria (Vic), or New South Wales or Queensland (other) 
+(4)sex: male (m) or female (f) 
+(5)age: age in years 
+(6)hdlngth: head length in mm 
+(7)skullw: skull width in mm 
+(8)totlngth: total length in cm 
+(9)taill: tail length in cm 
+(10)footlgth: foot length in mm 
+(11)earconch: ear conch length in mm 
+(12)eye: distance from medial canthus to lateral canthus of right eye in mm 
+(13)chest: chest girth in cm 
+(14)belly: belly girth in cm. My binary variable that I will be measuring is sex (male or female). I have 42 female possums and 59 male possums.
 
 ### Cluster Analysis
 
 ```{R}
+
+# Finding optimal number of clusters k
 library(cluster)
-# clustering code here
+sil_width <- vector()
+possum_num <- possum %>% select_if(is.numeric)
+for(i in 2:10){  
+  kms <- kmeans(possum_num ,centers=i) 
+  sil <- silhouette(kms$cluster,dist(possum_num )) 
+  sil_width[i]<-mean(sil[,3]) 
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+#Two is the optimal number of clusters
+
+
+#Pam Clustering (Numeric Only)
+pam1 <- possum %>% select_if(is.numeric) %>% scale %>% pam(k = 2)
+pam1
+
+possum_num %>% slice(pam1$id.med)
+
+#Visualization
+library(GGally)
+possum_num %>% mutate(cluster = as.factor(pam1$clustering)) %>% ggpairs(cols = 1:12, aes(color = cluster))
+
+#Goodness-of-Fit
+plot(pam1,which=2)
+pam1$silinfo$avg.width
 ```
 
-Discussion of clustering here
+The silhouette plot shows that the silhouette coefficient is highest (optimal) when k = 2.  However, the average silhouette width is 0.266, which means that the structure is weak and could be artificial. This makes sense as the 2 medioid variable values are overall pretty similar. Visualizing the cluster, 'site' shows the greatest difference between the two clusters.  Age is the most similar between the two clusters. In terms of site, the first 3 sites have higher earconch and foot length, but lower head length.  This could mean that the possums at the different sites develop differently due to their environment/diet. 
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+#PCA on my numeric variables
+possum_pca <- possum %>% select(-case)
+possum_pca_num <- possum_pca %>% select_if(is.numeric) %>% scale
+rownames(possum_pca_num) <- possum$case
+possum_pca <- princomp(possum_pca_num)
+names(possum_pca)
+summary(possum_pca, loadings = T)
+
+#Visualization
+library(factoextra)
+fviz_pca_biplot(possum_pca)
+
+eigval<-possum_pca$sdev^2
+varprop=round(eigval/sum(eigval), 2) 
+ggplot() + geom_bar(aes(y=varprop, x=1:11), stat="identity") + xlab("") + geom_text(aes(x=1:11, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=5) + scale_y_continuous(breaks=seq(0, .6, .2), labels = scales::percent) + scale_x_continuous(breaks=1:10)
 ```
 
-Discussions of PCA here. 
+Looking at the scree plot, you would need to keep PC1, PC2, PC3, PC4, and PC5 to reach the 80% threshold. PC1 and PC2 only account for 62% of the total variance, but the "elbow" is at PC2. In addition, only the first 2 PCs have eigenvalues greater than 1, so I decided to keep the first two PC's. PC1 seems to represent overall possum size. Generally, site is negatively correlated with age and body measurements. Thus, the latter sites in the experiment have smaller possums. PC2 seems to delve into the body measurements more. Looking at the biplot, possums with bigger feet and longer ear conch distance (negative PC2) tend to have smaller chest girth, overall length, head length, skull width, tail length, eye distance, and age. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+#Linear Regression
+library(caret)
+possum %>% select(-Pop, -case, -site) -> possum_lc
+fit <- lm(sex == "m" ~ age + hdlngth + skullw + totlngth + taill + footlgth + earconch + eye + chest + belly, data = possum_lc)
+summary(fit)
+prob_reg <- predict(fit, type = "response")
+class_diag(prob_reg, truth = possum_lc$sex, positive = "m")
+
+#Confusion Matrix
+x <- possum_lc$hdlngth
+y <- possum_lc$sex
+accuracy <- vector()
+cutoff <- 1:100
+for(i in cutoff){
+    y_hat <- ifelse(x>i, "m", "f")
+    accuracy[i] <- mean(y==y_hat)
+}
+min(possum_lc$hdlngth)
+ qplot(y=accuracy)+geom_line()+scale_x_continuous(breaks = seq(from = 80, to = 100, by = 5), limits = c(80, 100)) #only show 80+ bc the min head length is 82.5
+ y_hat <- ifelse(x>85, "m", "f")
+ table(actual = y, predicted = y_hat) %>% addmargins
+ 
+ 
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+# cross-validation
+
+set.seed(322)
+k = 10
+data <- sample_frac(possum_lc)
+diags <- NULL
+folds <- rep(1:k, length.out = nrow(data))
+i = 1
+for (i in 1:k) {
+ 
+     train <- data[folds != i, ]
+     test <- data[folds == i, ]
+     truth <- test$sex
+    
+     fit <- lm(sex == "m" ~ age + hdlngth + skullw + totlngth + taill + footlgth + earconch + eye + chest + belly, data = possum_lc)
+     probs <- predict(fit, newdata = test, type = "response")
+     
+     diags <- rbind(diags, class_diag(probs, truth, positive = "m"))
+ }
+summarize_all(diags,mean)
 ```
 
-Discussion here
+My linear regression model yielded an AUC of 0.7559, which is not too high, but not low. This means my model is decent at distinguishing between the positive and negative (male v. female) cases.  Looking at the summary statistics of our model 'fit', head length has the lowest p value of 0.0137. Since it is less than 0.05, we can conclude that headlength and sex have a statistically significant relationship. My overall p score is 0.0265, which means I can conclude that my model can predit a relationship between sex and possum physical characteristics. After finding the optimal cut off of 85, I proceeded to do the confusion matrix.  My model seems to do extremely well at predicting whether the possums are males, but poorly when the possums are female. After doing the CV, my new AUC is 0.3758, which is much lower than 0.7559. This means that my model shows no overfitting. 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+# KNN
+knn_fit <- knn3(sex == "m" ~ age + hdlngth + skullw + totlngth + taill + footlgth + earconch + eye + chest + belly, data = possum_lc)
+predict(knn_fit, possum_lc) -> y_hat_knn
+class_diag(y_hat_knn[,2], possum_lc$sex, positive = "m")
+
+#kNN confusion matrix
+y_hat_knn_mf <- ifelse(y_hat_knn>.5, "m", "f")
+table(actual = y, predicted = y_hat_knn_mf[,2]) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of np classifier here
+#kNN CV
+set.seed(322)
+k=10
+
+data<-sample_frac(possum_lc)
+folds <- rep(1:k, length.out=nrow(data))
+
+diags<-NULL
+
+i=1
+for(i in 1:k){
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$sex
+
+fit <- knn3(sex ~ age + hdlngth + skullw + totlngth + taill + footlgth + earconch + eye + chest + belly, data = train)
+   
+  
+probs <- predict(fit,newdata = test)[,2]
+ 
+diags<-rbind(diags,class_diag(probs,truth,positive = "m")) 
+}
+
+
+summarize_all(diags,mean)
 ```
 
-Discussion
-
+For my kNN model, my AUC is 0.8224, which means my model is pretty good at distinguishing between male and female possums based on their physical traits. Looking at the confusion matrix, we get an accuracy of 0.742, sensitivity of 0.738 and specificity of 0.745. After our CV, the AUC drops to 0.5856, which is much less than our original 0.8224.  We do not see signs of overfitting. My nonparamatic model performs much better than my linear model because my kNN AUC is higher. 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+# Classification Tree
+library(rpart)
+library(rpart.plot)
+fit_tree<- rpart(totlngth~., data=possum)
+rpart.plot(fit_tree)
+
+#MSE from linear reg
+yhat <- predict(fit_tree)
+mean((possum$totlngth-yhat)^2)
 ```
 
 ```{R}
 # cross-validation of regression model here
+set.seed(1234)
+cv <- trainControl(method="cv", number = 10, classProbs = T, savePredictions = T)
+fit <- train(totlngth ~ ., data=possum, trControl=cv, method="rpart")
+min(fit$results$RMSE)^2
+
 ```
 
-Discussion
+I did a classification tree, since I did a linear regression already for my linear classification.  Beginning at the top, if your head length is less than 91 (which only applies to 28% of the possums in the dataset), see if your tail length is less or greater than 37. If your tail length is less than 37, then your head length is 82.  If your tail length is greater than 37, then your head length is likely 86. Initially, I calculated a mean squared error of 5.233. During cross-validation, my MSE is higher, which unfortunately means my model is overfitting. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+
+rpossum <- possum %>% filter(case == 3) %>% select(sex)
+rpossum
+
 ```
 
 ```{python}
-# python code here
+py_python = r.rpossum
+type(py_python)
+
 ```
 
-Discussion
+In R, I found the sex of the third observation in the possum dataset, which was 'f'.  In python, I found that the class type for the sex is 'dict'. 
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
+Possum body length measurements between male v. female is not as distinctive as other animals are. Initially, I predicted that total body length was more indicative of sex, but it's surprisingly head length! The models and predictions I carried out on this possum dataset were not as strong as I predicted, but there were relationships between variables I never thought would be correlated ! Overall, this dataset was very interesting to model and predict on. 
 
 
 
